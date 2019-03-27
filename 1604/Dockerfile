@@ -5,7 +5,7 @@ ENV REFRESHED_AT 2019-03-12
 # based on dgraziotin/lamp
 # MAINTAINER Daniel Graziotin <daniel@ineed.coffee>
 
-ENV DOCKER_USER_ID 501 
+ENV DOCKER_USER_ID 501
 ENV DOCKER_USER_GID 20
 
 ENV BOOT2DOCKER_ID 1000
@@ -77,15 +77,56 @@ ADD supporting_files/apache_default /etc/apache2/sites-available/000-default.con
 RUN a2enmod rewrite
 
 # Configure /app folder with sample app
-RUN mkdir -p /app && rm -fr /var/www/html && ln -s /app /var/www/html
-ADD app/ /app
+RUN mkdir -p /app
 
 #Environment variables to configure php
 ENV PHP_UPLOAD_MAX_FILESIZE 10M
 ENV PHP_POST_MAX_SIZE 10M
 
-# Add volumes for the app and MySql
-VOLUME  ["/etc/mysql", "/var/lib/mysql", "/app" ]
+ENV TZ=America/New_York
+ENV UID=10000
+ENV GID=1002
 
-EXPOSE 80 3306
-CMD ["/run.sh"]
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
+    && apt-get update && apt-get -y --no-install-recommends install sudo curl xz-utils wget git python build-essential \
+    && apt install -y --no-install-recommends ca-certificates apt-transport-https ruby-full \
+    && curl -sL https://deb.nodesource.com/setup_10.x | sudo -E bash - \
+    && apt-get install -y nodejs
+
+RUN addgroup --gid $GID theia \
+    && adduser --disabled-password --gecos '' --uid $UID --gid $GID theia \
+    && adduser theia sudo \
+    && echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers \
+    && chmod g+rw /home \
+    && mkdir -p /home/project \
+    && mkdir -p /app \
+    && chown -R theia:theia /app \
+    && chown -R theia:theia /home/theia \
+    && chown -R theia:theia /home/project
+
+WORKDIR /home/theia
+COPY package.json ./package.json
+
+RUN npx yarn --cache-folder ./ycache \
+    && rm -rf ./ycache \
+    && NODE_OPTIONS="--max_old_space_size=4096" npx yarn theia build
+
+RUN apt-get install rsync php7.3-bz2 -y
+# Disabled in 7.2+, but still present in this image
+RUN rm /etc/php/7.3/cli/conf.d/20-mcrypt.ini
+
+# Setup template project
+RUN composer create-project --no-interaction acquia/lightning-project /home/project
+
+EXPOSE 80 3306 3000
+VOLUME  ["/etc/mysql", "/var/lib/mysql"]
+
+ENV SHELL /bin/bash
+ENV APACHE_ROOT "project/docroot"
+
+RUN ln -s /home/project /app/project
+RUN rm -rf /var/www/html && ln -s "/app/${APACHE_ROOT}" /var/www/html
+
+RUN echo "/run.sh & npx yarn theia start /home/project --hostname=0.0.0.0" > /newrun.sh
+
+CMD ["sh", "/newrun.sh"]
