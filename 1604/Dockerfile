@@ -119,7 +119,7 @@ RUN rm /etc/php/7.3/cli/conf.d/20-mcrypt.ini
 RUN composer create-project --no-interaction acquia/lightning-project /home/project
 
 EXPOSE 80 3306 3000
-VOLUME  ["/etc/mysql", "/var/lib/mysql"]
+# VOLUME  ["/etc/mysql", "/var/lib/mysql"]
 
 ENV SHELL /bin/bash
 ENV APACHE_ROOT "project/docroot"
@@ -128,5 +128,11 @@ RUN ln -s /home/project /app/project
 RUN rm -rf /var/www/html && ln -s "/app/${APACHE_ROOT}" /var/www/html
 
 RUN echo "/run.sh & npx yarn theia start /home/project --hostname=0.0.0.0" > /newrun.sh
+
+# Make drupal work now HACKY
+RUN cp /home/project/docroot/sites/default/default.settings.php /home/project/docroot/sites/default/settings.php
+RUN find /home/project/ -type d -exec chmod 777 {} \;
+RUN chmod 777 /home/project/docroot/sites/default/settings.php
+RUN sed -i -e 's/max_execution_time = 30/max_execution_time = 120/g' /etc/php/7.3/apache2/php.ini
 
 CMD ["sh", "/newrun.sh"]
